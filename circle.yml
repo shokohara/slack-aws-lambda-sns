@@ -1,0 +1,18 @@
+machine:
+  services:
+    - docker
+  java:
+    version: oraclejdk8
+dependencies:
+  override:
+    - sudo pip install awscli
+    - sbt clean test:compile
+test:
+  override:
+    - sbt test
+    - docker build -t home-ip:latest docker
+#deployment:
+#  production:
+#    branch: master
+#    commands:
+#      - ./deploy.sh
