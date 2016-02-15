@@ -6,6 +6,7 @@
 # LAMBDA_HANDLER
 projectName=$(sbt -no-colors name | tail -n1 | cut -d' ' -f2)
 
+sbt clean && \
 sbt assembly && \
 aws lambda update-function-code \
   --function-name $FUNCTION_NAME \
