@@ -3,6 +3,7 @@ name := "notify-to-slack"
 scalaVersion := "2.11.7"
 
 libraryDependencies ++= Seq(
+  "org.typelevel" %% "cats" % "0.4.1",
   "com.amazonaws" % "aws-lambda-java-core" % "1.0.0",
   "com.amazonaws" % "aws-lambda-java-events" % "1.0.0",
   "com.amazonaws" % "aws-java-sdk-route53" % "1.10.14",
