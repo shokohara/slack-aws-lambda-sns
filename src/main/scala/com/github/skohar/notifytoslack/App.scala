@@ -1,58 +1,67 @@
 package com.github.skohar.notifytoslack
 
-import java.nio.ByteBuffer
-import java.util.Base64
-
-import cats.std.all._
-import cats.syntax.all._
-import com.amazonaws.services.kms.AWSKMSClient
-import com.amazonaws.services.kms.model.DecryptRequest
+import com.amazonaws.services.lambda.AWSLambdaClient
+import com.amazonaws.services.lambda.model.GetFunctionRequest
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.events.SNSEvent
 import com.amazonaws.services.lambda.runtime.events.SNSEvent.SNS
 import net.gpedro.integrations.slack.{SlackApi, SlackMessage}
+import org.apache.commons.lang3.exception.ExceptionUtils
 import play.api.libs.json.Json
 
 import scala.collection.JavaConversions._
-
-case class Message(AlarmName: String, AlarmDescription: String, AWSAccountId: String, NewStateValue: String,
-                   NewStateReason: String, StateChangeTime: String, Region: String, OldStateValue: String,
-                   Trigger: String)
-object Message {
-  implicit val format = Json.format[Message]
-}
+import scala.util.control.Exception._
+import scalaz.Scalaz._
+import scalaz._
 
 class App {
-  val encryptedHookUrl = "CiBtXHThDHG4eY1P+iJ2keI45NjH9ijviFAGCv25sGNimBLQAQEBAgB4bVx04QxxuHmNT/oidpHiOOTYx/Yo74hQBgr9ubBjYpgAAACnMIGkBgkqhkiG9w0BBwaggZYwgZMCAQAwgY0GCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMEDF0UP5wx/XEEwKZAgEQgGABbDD0by8NrS0HI3i0a3nU5dJksHtJtsaZBcwERL/CU8S7uJIPukOPtmC2asZBxiIoUXomXZWiD8Sq5Qp94iljmkr0DQbHfZgT1Cpq4gZfzaz3sBaKRTudJujLwzsoTeg="
+
+  def toMessage(sns: SNS) = Json.parse(sns.getMessage).as[Message]
+
   val Alarm = "ALARM"
   val InsufficientData = "INSUFFICIENT_DATA"
   val Ok = "OK"
 
-  def handler(event: SNSEvent, context: Context) {
-    val messages = event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Alarm).map { sns =>
-      s""":exclamation: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-          |${sns.NewStateReason}
-        """.stripMargin
-    } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === InsufficientData).map { sns =>
-      s""":warning: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-          |${sns.NewStateReason}
-        """.stripMargin
-    } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Ok).map { sns =>
-      s""":+1: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-          |${sns.NewStateReason}
-        """.stripMargin
-    }
-    val decryptedHookUrl = decrypt(encryptedHookUrl)
-    messages.foreach { message =>
-      new SlackApi(s"https://$decryptedHookUrl").call(new SlackMessage("CloudWatch", message))
-    }
+  def handler(event: SNSEvent, context: Context): String = {
+    App.description2config(context).leftMap(ExceptionUtils.getStackTrace).leftMap(context.getLogger.log)
+    (for {
+      config <- App.description2config(context).leftMap(ExceptionUtils.getStackTrace)
+    } yield try {
+      event.getRecords.map(_.getSNS).map(_.getMessage).foreach(context.getLogger.log)
+      context.getLogger.log("yay2")
+      val messages = event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Alarm).map { sns =>
+        s""":exclamation: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
+            |${sns.NewStateReason}""".stripMargin
+      } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === InsufficientData).map { sns =>
+        s""":warning: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
+            |${sns.NewStateReason}""".stripMargin
+      } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Ok).map { sns =>
+        s""":+1: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
+            |${sns.NewStateReason}""".stripMargin
+      }
+      context.getLogger.log(config.toString)
+      messages.foreach(context.getLogger.log)
+      messages.foreach { message =>
+        new SlackApi(s"https://${config.slackWebHookUrl}").call(new SlackMessage("CloudWatch", message))
+      }
+      messages.mkString
+    } catch {
+      case t: Throwable =>
+        val stackTraceString = ExceptionUtils.getStackTrace(t)
+        context.getLogger.log(stackTraceString)
+        stackTraceString
+    }).toString
   }
+}
 
-  def toMessage(sns: SNS) = Json.parse(sns.getMessage).as[Message]
+object App {
 
-  def decrypt(encryptedText: String) = {
-    val byteBufferEncryptedText = ByteBuffer.wrap(Base64.getDecoder.decode(encryptedText))
-    val decryptRequest = new AWSKMSClient().decrypt(new DecryptRequest().withCiphertextBlob(byteBufferEncryptedText))
-    new String(decryptRequest.getPlaintext.array())
-  }
+  def log(config: LambdaConfig, text: String) =
+    new SlackApi(config.slackWebHookUrl).call(new SlackMessage("lambda:debug", s"``` $text ```"))
+
+  def description2config(context: Context) = \/.fromEither(allCatch either {
+    val description = new AWSLambdaClient()
+      .getFunction(new GetFunctionRequest().withFunctionName(context.getFunctionName)).getConfiguration.getDescription
+    Json.parse(description).as[LambdaConfig]
+  })
 }
