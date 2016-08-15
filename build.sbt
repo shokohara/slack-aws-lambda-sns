@@ -9,8 +9,8 @@ libraryDependencies ++= Seq(
   "com.typesafe.play" %% "play-json" % "2.5.4",
   "com.github.tototoshi" %% "play-json-naming" % "1.1.0",
   "net.gpedro.integrations.slack" % "slack-webhook" % "1.2.0",
-  "org.typelevel" %% "cats" % "0.4.1",
-  "org.scalaz" %% "scalaz-core" % "7.2.5",
+  "org.typelevel" %% "cats" % "0.6.1",
+  "org.scalaz" %% "scalaz-core" % "7.1.0",
   "org.apache.commons" % "commons-lang3" % "3.4",
   "org.scalatest" %% "scalatest" % "3.0.0" % "test"
 )

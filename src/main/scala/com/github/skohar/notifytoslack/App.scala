@@ -15,32 +15,49 @@ import scala.collection.JavaConversions._
 import scala.collection.Seq
 import scala.concurrent.Future
 import scala.util.control.Exception._
-import scalaz.Scalaz._
-import scalaz._
-import scalaz._
-import syntax.traverse._
-import std.scalaFuture._
-import std.option._
-import syntax.bind._
+//import scalaz._
+//import scalaz.Scalaz._
+//import scalaz._, scalaz.syntax.traverse._, scalaz.std._
+//import std.scalaFuture._
+//import cats.std.option._
+//import syntax.bind._
+
+//import cats._
+//import cats.syntax.traverse._
+//import cats.syntax.all._
+//import cats.data.{Validated, ValidatedNel}
+import cats.data.Xor
+import cats._
+import cats.syntax.traverse._
+import cats.std.all._
 
 class App {
 
-  def toMessage(sns: SNS): Throwable \/ Message = try {
-    \/-(Json.parse(sns.getMessage).as[Message])
+  def toMessage(sns: SNS): Throwable Xor Message = try {
+    Xor.right(Json.parse(sns.getMessage).as[Message])
   } catch {
-    case e: Throwable => -\/(e)
+    case e: Throwable => Xor.left(e)
+  }
+
+  def toMessage2(sns: SNS): Either[Throwable,Message ]= try {
+    Right(Json.parse(sns.getMessage).as[Message])
+  } catch {
+    case e: Throwable => Left(e)
   }
 
   def handler(event: SNSEvent, context: Context): String = {
+    def parseInt(s: Message): Option[Message] = Some(s)
     (for {
       config <- App.description2config(context).leftMap(ExceptionUtils.getStackTrace)
+      m <- event.getRecords.map(_.getSNS).map(toMessage).toList.sequence
+//      a<-List(1.right, (new Exception).left, (new Error).left).sequenceU
     } yield try {
       def toText(message: Message) =
-        s"""${message.AutoScalingGroupName}
-           |${message.Description}""".stripMargin
+        s"""AutoScalingGroupName: ${message.AutoScalingGroupName}
+           |Description: ${message.Description}""".stripMargin
       val messages = event.getRecords.map(_.getSNS).map(toMessage).map {
-        case -\/(x) => s"""``` ${ExceptionUtils.getStackTrace(x)} ```"""
-        case \/-(x) => toText(x)
+        case Xor.Left(x) => s"""``` ${ExceptionUtils.getStackTrace(x)} ```"""
+        case Xor.Right(x) => toText(x)
       }
       messages.map(new SlackMessage("AutoScalingGroup", _)).foreach(new SlackApi(config.slackWebHookUrl).call)
       messages.mkString
@@ -58,7 +75,7 @@ object App {
   def log(config: LambdaConfig, text: String) =
     new SlackApi(config.slackWebHookUrl).call(new SlackMessage("lambda:debug", s"``` $text ```"))
 
-  def description2config(context: Context) = \/.fromEither(allCatch either {
+  def description2config(context: Context) = Xor.fromEither(allCatch either {
     val request = new GetFunctionRequest().withFunctionName(context.getFunctionName)
     val description = new AWSLambdaClient().getFunction(request).getConfiguration.getDescription
     Json.parse(description).as[LambdaConfig]
