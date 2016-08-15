@@ -7,16 +7,25 @@ import com.amazonaws.services.lambda.runtime.events.SNSEvent
 import com.amazonaws.services.lambda.runtime.events.SNSEvent.SNS
 import net.gpedro.integrations.slack.{SlackApi, SlackMessage}
 import org.apache.commons.lang3.exception.ExceptionUtils
-import play.api.libs.json.Json
+import play.api.data.validation.ValidationError
+import play.api.libs.json.{JsError, JsPath, JsResultException, Json}
 
 import scala.collection.JavaConversions._
+import scala.collection.Seq
+import scala.concurrent.Future
 import scala.util.control.Exception._
 import scalaz.Scalaz._
 import scalaz._
+import scalaz._
+import syntax.traverse._
+import std.scalaFuture._
+import std.option._
+import syntax.bind._
 
 class App {
 
-//  def toMessage(sns: SNS) = Json.parse(sns.getMessage).as[Message]
+  def toMessage(sns: SNS): Seq[(JsPath, Seq[ValidationError])] \/ Message =
+    \/.fromEither(Json.parse(sns.getMessage).validate[Message].asEither)
 
   val Alarm = "ALARM"
   val InsufficientData = "INSUFFICIENT_DATA"
@@ -31,23 +40,22 @@ class App {
       context.getLogger.log("yay1")
       event.getRecords.map(_.getSNS).map(_.getMessage).foreach(context.getLogger.log)
       context.getLogger.log("yay2")
-//      val messages = event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Alarm).map { sns =>
-//        s""":exclamation: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-//            |${sns.NewStateReason}""".stripMargin
-//      } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === InsufficientData).map { sns =>
-//        s""":warning: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-//            |${sns.NewStateReason}""".stripMargin
-//      } ++ event.getRecords.map(_.getSNS).map(toMessage).filter(_.NewStateReason === Ok).map { sns =>
-//        s""":+1: * ${sns.NewStateValue} : ${sns.AlarmDescription}*
-//            |${sns.NewStateReason}""".stripMargin
-//      }
-//      context.getLogger.log(config.toString)
-//      messages.foreach(context.getLogger.log)
-//      messages.foreach { message =>
-//        new SlackApi(s"https://${config.slackWebHookUrl}").call(new SlackMessage("CloudWatch", message))
-//      }
-//      messages.mkString
-      ""
+      val emoji = (_: String) match {
+        case Alarm => "exclamation"
+        case InsufficientData => "warning"
+        case Ok => "+1"
+      }
+      def toText(x: Message) =
+        s""":${emoji(x.NewStateReason)}: * ${x.NewStateValue} : ${x.AlarmDescription}*
+            |${x.NewStateReason}""".stripMargin
+      val messages: Seq[String] = event.getRecords.map(_.getSNS).map(toMessage).map {
+        case -\/(x) => ExceptionUtils.getStackTrace(JsResultException(x))
+        case \/-(x) => toText(x)
+      }
+      messages.foreach { message =>
+        new SlackApi(s"https://${config.slackWebHookUrl}").call(new SlackMessage("CloudWatch", message))
+      }
+      messages.mkString
     } catch {
       case t: Throwable =>
         val stackTraceString = ExceptionUtils.getStackTrace(t)
