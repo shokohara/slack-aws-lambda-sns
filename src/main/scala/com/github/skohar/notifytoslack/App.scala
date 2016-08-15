@@ -28,29 +28,43 @@ class App {
 
   def post(config: LambdaConfig, slackMessage: SlackMessage) = new SlackApi(config.slackWebHookUrl).call(slackMessage)
 
-  def handler(event: SNSEvent, context: Context): Any = {
-    val result: Either[Throwable, String] = for {
+  def handler(event: SNSEvent, context: Context) = {
+    val result: String = (for {
       config <- App.description2config(context).right
-      messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Either[Throwable, Message]]).sequenceU
-        .right
-      voids <- (messages.map(toTextForSlack).map(new SlackMessage("AutoScalingGroup", _))
-        .map(x => allCatch either new MySlackApi(config.slackWebHookUrl).send(x.prepare())): List[Either[Throwable, String]])
-        .sequenceU.right
     } yield {
-      voids.mkString(System.lineSeparator)
-    }
-    result.left.map(ExceptionUtils.getStackTrace).merge
+      Slack.log(config, "Succeeded in description2config")
+      val result = (for {
+        messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Either[Throwable, Message]]).sequenceU
+          .right
+        voids <- (messages.map(toTextForSlack).map(new SlackMessage("AutoScalingGroup", _))
+          .map(x => allCatch either Slack.log(config, x)): List[Either[Throwable, String]])
+          .sequenceU.right
+      } yield {
+        voids.mkString(System.lineSeparator)
+      }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
+      context.getLogger.log(result)
+      Slack.log(config, result)
+    }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
+    context.getLogger.log(result)
   }
 }
 
+object Slack {
+  def log(config: LambdaConfig, slackMessage: SlackMessage): String = {
+    new SlackApi(config.slackWebHookUrl).call(slackMessage)
+    ().toString
+  }
+
+  def log(config: LambdaConfig, username: String, text: String): String = log(config, new SlackMessage(username, text))
+
+  def log(config: LambdaConfig, text: String): String = log(config, "Lambda:AutoScalingGroup", text)
+}
+
 object App {
-
-  def log(config: LambdaConfig, text: String) =
-    new SlackApi(config.slackWebHookUrl).call(new SlackMessage("lambda:debug", s"``` $text ```"))
-
   def description2config(context: Context): Either[Throwable, LambdaConfig] = allCatch either {
     val request = new GetFunctionRequest().withFunctionName(context.getFunctionName)
     val description = new AWSLambdaClient().getFunction(request).getConfiguration.getDescription
+    context.getLogger.log(description)
     Json.parse(description).as[LambdaConfig]
   }
 }
