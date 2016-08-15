@@ -49,7 +49,7 @@ class App {
         s""":${emoji(x.NewStateReason)}: * ${x.NewStateValue} : ${x.AlarmDescription}*
             |${x.NewStateReason}""".stripMargin
       val messages: Seq[String] = event.getRecords.map(_.getSNS).map(toMessage).map {
-        case -\/(x) => ExceptionUtils.getStackTrace(JsResultException(x))
+        case -\/(x) => s"""``` ${ExceptionUtils.getStackTrace(JsResultException(x))} ```"""
         case \/-(x) => toText(x)
       }
       messages.foreach { message =>
