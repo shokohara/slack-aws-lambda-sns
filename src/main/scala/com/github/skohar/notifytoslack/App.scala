@@ -32,7 +32,7 @@ class App {
     val result: String = (for {
       config <- App.description2config(context).right
     } yield {
-      Slack.log(config, "Succeeded in description2config")
+      Slack.log(config, "Lambda:debug:AutoScalingGroup", "Succeeded in description2config")
       val result = (for {
         messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Either[Throwable, Message]]).sequenceU
           .right
@@ -43,7 +43,7 @@ class App {
         voids.mkString(System.lineSeparator)
       }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
       context.getLogger.log(result)
-      Slack.log(config, result)
+      Slack.log(config, "AutoScalingGroup", result)
     }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
     context.getLogger.log(result)
   }
@@ -56,8 +56,6 @@ object Slack {
   }
 
   def log(config: LambdaConfig, username: String, text: String): String = log(config, new SlackMessage(username, text))
-
-  def log(config: LambdaConfig, text: String): String = log(config, "Lambda:AutoScalingGroup", text)
 }
 
 object App {
