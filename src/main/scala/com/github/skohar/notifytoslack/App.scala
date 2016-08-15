@@ -25,10 +25,10 @@ import syntax.bind._
 
 class App {
 
-  def toMessage(sns: SNS): JsResultException \/ Message = try {
+  def toMessage(sns: SNS): Throwable \/ Message = try {
     \/-(Json.parse(sns.getMessage).as[Message])
   } catch {
-    case e: (_:JsResultException | _:JsonParseException)=> -\/(e)
+    case e: Throwable => -\/(e)
   }
 
   def handler(event: SNSEvent, context: Context): String = {
@@ -48,7 +48,7 @@ class App {
         case -\/(x) => s"""``` ${ExceptionUtils.getStackTrace(x)} ```"""
         case \/-(x) => toText(x)
       }
-      messages.map(new SlackMessage("CloudWatch", _)).foreach(new SlackApi(s"https://${config.slackWebHookUrl}").call)
+      messages.map(new SlackMessage("CloudWatch", _)).foreach(new SlackApi(config.slackWebHookUrl).call)
       messages.mkString
       ""
     } catch {
