@@ -35,22 +35,15 @@ class App {
     (for {
       config <- App.description2config(context).leftMap(ExceptionUtils.getStackTrace)
     } yield try {
-      event.getRecords.map(_.getSNS).map(_.getMessage).foreach(App.log(config, _))
-      val emoji = (_: String) match {
-        case "ALARM" => "exclamation"
-        case "INSUFFICIENT_DATA" => "warning"
-        case "OK" => "+1"
-      }
       def toText(message: Message) =
-        s""":${emoji(message.NewStateReason)}: * ${message.NewStateValue} : ${message.AlarmDescription}*
-            |${message.NewStateReason}""".stripMargin
+        s"""${message.AutoScalingGroupName}
+           |${message.Description}""".stripMargin
       val messages = event.getRecords.map(_.getSNS).map(toMessage).map {
         case -\/(x) => s"""``` ${ExceptionUtils.getStackTrace(x)} ```"""
         case \/-(x) => toText(x)
       }
-      messages.map(new SlackMessage("CloudWatch", _)).foreach(new SlackApi(config.slackWebHookUrl).call)
+      messages.map(new SlackMessage("AutoScalingGroup", _)).foreach(new SlackApi(config.slackWebHookUrl).call)
       messages.mkString
-      ""
     } catch {
       case t: Throwable =>
         val stackTraceString = ExceptionUtils.getStackTrace(t)
