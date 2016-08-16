@@ -17,7 +17,7 @@ import scala.util.control.Exception._
 
 class App {
 
-  def toMessage(sns: SNS): Xor[Throwable, Message] =
+  def toMessage(sns: SNS): Throwable Xor Message =
     Xor.fromEither(allCatch either Json.parse(sns.getMessage).as[Message])
 
   def toTextForSlack(message: Message) =
@@ -27,11 +27,12 @@ class App {
   def handler(event: SNSEvent, context: Context) = {
     val result: String = (for {
       config <- App.description2config(context)
-      messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Xor[Throwable, Message]]).sequenceU
-      voids <- (messages.map(toTextForSlack).map(new SlackMessage("AutoScalingGroup", _))
-        .map(x => Slack.log(config, x)): List[Xor[Throwable, Unit]]).sequenceU
+      messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Throwable Xor Message]).sequenceU
+        .map(_.map(toTextForSlack))
+      voids <- (messages.map(new SlackMessage("AutoScalingGroup", _))
+        .map(x => Slack.log(config, x)): List[Throwable Xor Unit]).sequenceU
     } yield {
-      voids.mkString(System.lineSeparator)
+      messages.mkString(System.lineSeparator)
     }).map(_.toString).leftMap(ExceptionUtils.getStackTrace).leftMap(x => s"""``` $x ```""").merge
     context.getLogger.log(result)
   }
@@ -47,7 +48,7 @@ object Slack {
 }
 
 object App {
-  def description2config(context: Context): Xor[Throwable, LambdaConfig] = Xor.fromEither(allCatch either {
+  def description2config(context: Context): Throwable Xor LambdaConfig = Xor.fromEither(allCatch either {
     val request = new GetFunctionRequest().withFunctionName(context.getFunctionName)
     val description = new AWSLambdaClient().getFunction(request).getConfiguration.getDescription
     context.getLogger.log(description)
