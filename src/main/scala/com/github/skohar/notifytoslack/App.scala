@@ -1,5 +1,6 @@
 package com.github.skohar.notifytoslack
 
+import cats.data.Xor
 import cats.std.all._
 import cats.syntax.traverse._
 import com.amazonaws.services.lambda.AWSLambdaClient
@@ -16,53 +17,42 @@ import scala.util.control.Exception._
 
 class App {
 
-  def toMessage(sns: SNS): Either[Throwable, Message] = try {
-    Right(Json.parse(sns.getMessage).as[Message])
-  } catch {
-    case e: Throwable => Left(e)
-  }
+  def toMessage(sns: SNS): Xor[Throwable, Message] =
+    Xor.fromEither(allCatch either Json.parse(sns.getMessage).as[Message])
 
   def toTextForSlack(message: Message) =
     s"""AutoScalingGroupName: ${message.AutoScalingGroupName}
         |Description: ${message.Description}""".stripMargin
 
-  def post(config: LambdaConfig, slackMessage: SlackMessage) = new SlackApi(config.slackWebHookUrl).call(slackMessage)
-
   def handler(event: SNSEvent, context: Context) = {
     val result: String = (for {
-      config <- App.description2config(context).right
+      config <- App.description2config(context)
+      messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Xor[Throwable, Message]]).sequenceU
+      voids <- (messages.map(toTextForSlack).map(new SlackMessage("AutoScalingGroup", _))
+        .map(x => Slack.log(config, x)): List[Xor[Throwable, Unit]]).sequenceU
     } yield {
-      Slack.log(config, "Lambda:debug:AutoScalingGroup", "Succeeded in description2config")
-      val result = (for {
-        messages <- (event.getRecords.map(_.getSNS).map(toMessage).toList: List[Either[Throwable, Message]]).sequenceU
-          .right
-        voids <- (messages.map(toTextForSlack).map(new SlackMessage("AutoScalingGroup", _))
-          .map(x => allCatch either Slack.log(config, x)): List[Either[Throwable, String]])
-          .sequenceU.right
-      } yield {
-        voids.mkString(System.lineSeparator)
-      }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
-      context.getLogger.log(result)
-      Slack.log(config, "AutoScalingGroup", result)
-    }).left.map(ExceptionUtils.getStackTrace).left.map(x => s"""``` $x ```""").merge
+      voids.mkString(System.lineSeparator)
+    }).map(_.toString).leftMap(ExceptionUtils.getStackTrace).leftMap(x => s"""``` $x ```""").merge
     context.getLogger.log(result)
   }
 }
 
 object Slack {
-  def log(config: LambdaConfig, slackMessage: SlackMessage): String = {
-    new SlackApi(config.slackWebHookUrl).call(slackMessage)
-    ().toString
-  }
 
-  def log(config: LambdaConfig, username: String, text: String): String = log(config, new SlackMessage(username, text))
+  def log(config: LambdaConfig, slackMessage: SlackMessage): Throwable Xor Unit =
+    Xor.fromEither(allCatch either new SlackApi(config.slackWebHookUrl).call(slackMessage))
+
+  def log(config: LambdaConfig, username: String, text: String): Throwable Xor Unit =
+    log(config, new SlackMessage(username, text))
 }
 
 object App {
-  def description2config(context: Context): Either[Throwable, LambdaConfig] = allCatch either {
+  def description2config(context: Context): Xor[Throwable, LambdaConfig] = Xor.fromEither(allCatch either {
     val request = new GetFunctionRequest().withFunctionName(context.getFunctionName)
     val description = new AWSLambdaClient().getFunction(request).getConfiguration.getDescription
     context.getLogger.log(description)
-    Json.parse(description).as[LambdaConfig]
-  }
+    val result = Json.parse(description).as[LambdaConfig]
+    Slack.log(result, "Lambda:debug:AutoScalingGroup", "Succeeded in description2config")
+    result
+  })
 }
