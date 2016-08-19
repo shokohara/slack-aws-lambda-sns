@@ -1,4 +1,4 @@
-package com.github.skohar.awslambda
+package com.github.skohar.lambda
 
 import com.amazonaws.services.lambda.runtime.Context
 

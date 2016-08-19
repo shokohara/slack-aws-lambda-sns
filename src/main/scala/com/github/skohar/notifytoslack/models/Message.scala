@@ -1,4 +1,4 @@
-package com.github.skohar.notifytoslack
+package com.github.skohar.notifytoslack.models
 
 import play.api.libs.json.Json
 
